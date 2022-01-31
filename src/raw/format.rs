@@ -5,6 +5,7 @@ use super::unaligned::{U16, U32};
 
 // Written with help from https://gankra.github.io/blah/compact-unwinding/
 
+/// The `__unwind_info` header.
 #[derive(FromBytes, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CompactUnwindInfoHeader {
@@ -38,6 +39,7 @@ pub struct CompactUnwindInfoHeader {
     // lsdas: [LsdaEntry; unknown_len],
 }
 
+/// One element of the array of pages.
 #[derive(FromBytes, Clone, Copy)]
 #[repr(C)]
 pub struct PageEntry {
@@ -60,6 +62,7 @@ pub struct PageEntry {
     pub lsda_index_offset: U32,
 }
 
+/// A non-compressed page.
 #[derive(FromBytes, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct RegularPage {
@@ -71,6 +74,7 @@ pub struct RegularPage {
     pub functions_len: U16,
 }
 
+/// A "compressed" page.
 #[derive(FromBytes, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CompressedPage {
@@ -93,12 +97,12 @@ pub struct CompressedPage {
     pub local_opcodes_len: U16,
 }
 
+/// An opcode.
 #[derive(FromBytes, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct Opcode {
-    pub opcode: U32,
-}
+pub struct Opcode(pub U32);
 
+/// A function entry from a non-compressed page.
 #[derive(FromBytes, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct RegularFunctionEntry {

@@ -1,6 +1,7 @@
 use crate::num_display::HexNum;
 use std::fmt::Debug;
 
+/// Allows accessing the two packed values from a "compressed" function entry.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct CompressedFunctionEntry(pub u32);
 
@@ -8,6 +9,7 @@ pub struct CompressedFunctionEntry(pub u32);
 /// * 8 bits: opcode index
 /// * 24 bits: function address
 impl CompressedFunctionEntry {
+    /// Wrap the u32.
     pub fn new(value: u32) -> Self {
         Self(value)
     }

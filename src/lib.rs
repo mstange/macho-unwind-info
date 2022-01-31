@@ -1,3 +1,31 @@
+//! A zero-copy parser for the contents of the `__unwind_info` section of a
+//! mach-O binary.
+//!
+//! Quickly look up the unwinding opcode for an address.
+//!
+//! This crate is intended to be fast enough to be used in a sampling profiler.
+//! Re-parsing from scratch is cheap and can be done on every sample.
+//!
+//! # Example
+//!
+//! ```rust
+//! use macho_unwind_info::UnwindInfo;
+//! use macho_unwind_info::opcodes::OpcodeX86_64;
+//!
+//! # fn example(data: &[u8]) -> Result<(), macho_unwind_info::Error> {
+//! let unwind_info = UnwindInfo::parse(data)?;
+//!
+//! if let Some(function) = unwind_info.lookup(0x1234)? {
+//!     println!("Found function entry covering the address 0x1234:");
+//!     let opcode = OpcodeX86_64::parse(function.opcode);
+//!     println!("0x{:08x}..0x{:08x}: {}", function.start_address, function.end_address, opcode);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//!
+
 mod error;
 mod num_display;
 pub mod opcodes;
@@ -7,16 +35,50 @@ mod reader;
 pub use error::Error;
 use raw::*;
 
+/// A parsed representation of the unwind info.
+///
+/// The UnwindInfo contains a list of pages, each of which contain a list of
+/// function entries.
 pub struct UnwindInfo<'a>(PartialPages<'a>);
 
+/// The information about a single function in the UnwindInfo.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Function {
+    /// The address where this function starts.
+    pub start_address: u32,
+
+    /// The address where this function ends. Includes the padding at the end of
+    /// the function. In reality, this is the address of the *next* function
+    /// entry, or for the last function this is the address of the sentinel page
+    /// entry.
+    pub end_address: u32,
+
+    /// The opcode which describes the unwinding information for this function.
+    /// This opcode needs to be parsed in an architecture-specific manner.
+    /// See the [opcodes] module for the facilities to do so.
+    pub opcode: u32,
+}
+
+/// Internals used for both UnwindInfo and PagesIter. When used in PageIter, the
+/// pages field is the slice of the remaining to-be-iterated-over pages.
 #[derive(Clone, Copy)]
 struct PartialPages<'a> {
+    /// The full __unwind_info section data.
     data: &'a [u8],
+
+    /// The list of global opcodes.
     global_opcodes: &'a [Opcode],
+
+    /// The list of page entries in this UnwindInfo.
+    /// If this is the PartialPages inside a PageIter, this is the slice of the
+    /// remaining to-be-iterated-over pages.
     pages: &'a [PageEntry],
 }
 
 impl<'a> UnwindInfo<'a> {
+    /// Create an [UnwindInfo] instance which wraps the raw bytes of a mach-O binary's
+    /// `__unwind_info` section. The data can have arbitrary alignment. The parsing done
+    /// in this function is minimal; it's basically just three bounds checks.
     pub fn parse(data: &'a [u8]) -> Result<Self, Error> {
         let header = CompactUnwindInfoHeader::parse(data)?;
         let global_opcodes = header.global_opcodes(data)?;
@@ -28,10 +90,26 @@ impl<'a> UnwindInfo<'a> {
         }))
     }
 
+    /// Returns an iterator over the pages in this UnwindInfo.
     pub fn pages(&self) -> PageIter<'a> {
         PageIter(self.0)
     }
 
+    /// Looks up the unwind information for the function that covers the given address.
+    /// Returns `Ok(Some(function))` if a function was found.
+    /// Returns `Ok(None)` if the address was outside of the range of addresses covered
+    /// by the unwind info.
+    /// Returns `Err(error)` if there was a problem with the format of the `__unwind_info`
+    /// data.
+    ///
+    /// This lookup is architecture agnostic. The opcode is returned as a u32.
+    /// To actually perform unwinding, the opcode needs to be parsed in an
+    /// architecture-specific manner.
+    ///
+    /// The design of the compact unwinding format makes this lookup extremely cheap.
+    /// It's just two binary searches: First to find the right page, end then to find
+    /// the right function within a page. The search happens inside the wrapped data,
+    /// with no extra copies.
     pub fn lookup(&self, pc: u32) -> Result<Option<Function>, Error> {
         let PartialPages {
             pages,
@@ -133,6 +211,7 @@ impl<'a> UnwindInfo<'a> {
     }
 }
 
+/// An iterator over the pages in the UnwindInfo.
 pub struct PageIter<'a>(PartialPages<'a>);
 
 impl<'a> PageIter<'a> {
@@ -179,25 +258,29 @@ impl<'a> PageIter<'a> {
     }
 }
 
+/// One page in the UnwindInfo.
 pub struct Page<'a>(PartialFunctions<'a>);
 
+/// Internals used for both Page and FunctionIter. When used in FunctionIter, the
+/// functions field is the slice of the remaining to-be-iterated-over functions.
 #[derive(Clone, Copy)]
 enum PartialFunctions<'a> {
     Regular {
         page_address: u32,
-        functions: &'a [RegularFunctionEntry],
         next_page_address: u32,
+        functions: &'a [RegularFunctionEntry],
     },
     Compressed {
         page_address: u32,
-        functions: &'a [U32],
+        next_page_address: u32,
         local_opcodes: &'a [Opcode],
         global_opcodes: &'a [Opcode],
-        next_page_address: u32,
+        functions: &'a [U32],
     },
 }
 
 impl<'a> Page<'a> {
+    /// The start of the address range covered by the functions in this page.
     pub fn start_address(&self) -> u32 {
         match self.0 {
             PartialFunctions::Regular { page_address, .. } => page_address,
@@ -205,6 +288,7 @@ impl<'a> Page<'a> {
         }
     }
 
+    /// The end of the address range covered by the functions in this page.
     pub fn end_address(&self) -> u32 {
         match self.0 {
             PartialFunctions::Regular {
@@ -216,11 +300,13 @@ impl<'a> Page<'a> {
         }
     }
 
+    /// An iterator over the functions in this page.
     pub fn functions(&self) -> FunctionIter<'a> {
         FunctionIter(self.0)
     }
 }
 
+/// An iterator over the functions in an UnwindInfo page.
 pub struct FunctionIter<'a>(PartialFunctions<'a>);
 
 impl<'a> Iterator for FunctionIter<'a> {
@@ -279,11 +365,4 @@ impl<'a> Iterator for FunctionIter<'a> {
             }
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Function {
-    pub start_address: u32,
-    pub end_address: u32,
-    pub opcode: u32,
 }

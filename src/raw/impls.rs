@@ -121,7 +121,7 @@ impl CompressedPage {
 
 impl Opcode {
     pub fn opcode(&self) -> u32 {
-        self.opcode.into()
+        self.0.into()
     }
 }
 
