@@ -1,14 +1,11 @@
-mod compressed_function;
 mod error;
 mod num_display;
-mod opcodes;
-mod raw;
+pub mod opcodes;
+pub mod raw;
 mod reader;
 
-pub use compressed_function::*;
 pub use error::Error;
-pub use opcodes::*;
-pub use raw::*;
+use raw::*;
 
 pub struct UnwindInfo<'a>(PartialPages<'a>);
 

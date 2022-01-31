@@ -1,4 +1,3 @@
-
 /// Magically unpack up to 6 values from 10 bits.
 ///
 /// Background:

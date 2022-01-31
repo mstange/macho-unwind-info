@@ -1,8 +1,9 @@
-
+mod compressed_function;
 pub mod consts;
-mod structs;
-mod struct_impls;
+mod format;
+mod impls;
 mod unaligned;
 
-pub use structs::*;
+pub use compressed_function::*;
+pub use format::*;
 pub use unaligned::*;

@@ -1,8 +1,8 @@
 use std::fmt::Display;
 
-use crate::consts::*;
 use super::bitfield::OpcodeBitfield;
 use super::permutation::decode_permutation_6;
+use crate::consts::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RegisterNameX86 {
@@ -54,11 +54,13 @@ pub enum OpcodeX86 {
     Dwarf {
         eh_frame_fde: u32,
     },
+    InvalidFramelessImmediate,
+    UnrecognizedKind(u8),
 }
 
 impl OpcodeX86 {
-    pub fn parse(opcode: u32) -> Option<Self> {
-        let opcode = match OpcodeBitfield::new(opcode).kind() {
+    pub fn parse(opcode: u32) -> Self {
+        match OpcodeBitfield::new(opcode).kind() {
             OPCODE_KIND_NULL => OpcodeX86::Null,
             OPCODE_KIND_X86_FRAMEBASED => OpcodeX86::FrameBased {
                 stack_offset_in_bytes: (((opcode >> 16) & 0xff) as u16) * 4,
@@ -75,7 +77,10 @@ impl OpcodeX86 {
                 let register_count = (opcode >> 10) & 0b111;
                 let register_permutation = opcode & 0b11_1111_1111;
                 let saved_registers =
-                    decode_permutation_6(register_count, register_permutation).ok()?;
+                    match decode_permutation_6(register_count, register_permutation) {
+                        Ok(regs) => regs,
+                        Err(_) => return OpcodeX86::InvalidFramelessImmediate,
+                    };
                 OpcodeX86::FramelessImmediate {
                     stack_size_in_bytes,
                     saved_regs: [
@@ -92,9 +97,8 @@ impl OpcodeX86 {
             OPCODE_KIND_X86_DWARF => OpcodeX86::Dwarf {
                 eh_frame_fde: (opcode & 0xffffff),
             },
-            _ => return None,
-        };
-        Some(opcode)
+            kind => OpcodeX86::UnrecognizedKind(kind),
+        }
     }
 }
 
@@ -141,6 +145,15 @@ impl Display for OpcodeX86 {
             }
             OpcodeX86::Dwarf { eh_frame_fde } => {
                 write!(f, "(check eh_frame FDE 0x{:x})", eh_frame_fde)?;
+            }
+            OpcodeX86::InvalidFramelessImmediate => {
+                write!(
+                    f,
+                    "!! frameless immediate with invalid permutation encoding"
+                )?;
+            }
+            OpcodeX86::UnrecognizedKind(kind) => {
+                write!(f, "!! Unrecognized kind {}", kind)?;
             }
         }
         Ok(())

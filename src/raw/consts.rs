@@ -1,4 +1,3 @@
-
 pub const PAGE_KIND_SENTINEL: u32 = 1; // used in the last page, whose first_address is the end address
 pub const PAGE_KIND_REGULAR: u32 = 2;
 pub const PAGE_KIND_COMPRESSED: u32 = 3;

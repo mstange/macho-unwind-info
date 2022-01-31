@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
-use crate::raw::consts::*;
 use super::bitfield::OpcodeBitfield;
+use crate::raw::consts::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum OpcodeArm64 {
@@ -27,11 +27,12 @@ pub enum OpcodeArm64 {
         x21_and_x22_saved: bool,
         x19_and_x20_saved: bool,
     },
+    UnrecognizedKind(u8),
 }
 
 impl OpcodeArm64 {
-    pub fn parse(opcode: u32) -> Option<Self> {
-        let opcode = match OpcodeBitfield::new(opcode).kind() {
+    pub fn parse(opcode: u32) -> Self {
+        match OpcodeBitfield::new(opcode).kind() {
             OPCODE_KIND_NULL => OpcodeArm64::Null,
             OPCODE_KIND_ARM64_FRAMELESS => OpcodeArm64::Frameless {
                 stack_size_in_bytes: (((opcode >> 12) & 0b1111_1111_1111) as u16) * 16,
@@ -54,9 +55,8 @@ impl OpcodeArm64 {
                     x19_and_x20_saved: (opcode & 1) == 1,
                 }
             }
-            _ => return None,
-        };
-        Some(opcode)
+            kind => OpcodeArm64::UnrecognizedKind(kind),
+        }
     }
 }
 
@@ -110,6 +110,9 @@ impl Display for OpcodeArm64 {
                 next_pair(*x23_and_x24_saved, "reg23", "reg24")?;
                 next_pair(*x21_and_x22_saved, "reg21", "reg22")?;
                 next_pair(*x19_and_x20_saved, "reg19", "reg20")?;
+            }
+            OpcodeArm64::UnrecognizedKind(kind) => {
+                write!(f, "!! Unrecognized kind {}", kind)?;
             }
         }
         Ok(())

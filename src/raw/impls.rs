@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use super::structs::{
+use super::format::{
     CompactUnwindInfoHeader, CompressedPage, Opcode, PageEntry, RegularFunctionEntry, RegularPage,
 };
 use super::unaligned::U32;

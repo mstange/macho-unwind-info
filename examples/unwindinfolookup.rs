@@ -1,6 +1,7 @@
 use std::{fmt::Display, fs::File, io::Read};
 
-use macho_unwind_info::{OpcodeArm64, OpcodeBitfield, OpcodeX86, OpcodeX86_64, UnwindInfo};
+use macho_unwind_info::opcodes::{OpcodeArm64, OpcodeX86, OpcodeX86_64};
+use macho_unwind_info::UnwindInfo;
 use object::{Architecture, ObjectSection};
 
 fn main() {
@@ -49,30 +50,17 @@ fn main() {
 }
 
 fn print_entry(address: u32, opcode: u32, arch: Architecture) {
-    let kind = OpcodeBitfield::new(opcode).kind();
     match arch {
-        Architecture::I386 => {
-            print_entry_impl(address, OpcodeX86::parse(opcode), kind);
-        }
-        Architecture::X86_64 => {
-            print_entry_impl(address, OpcodeX86_64::parse(opcode), kind);
-        }
-        Architecture::Aarch64 => {
-            print_entry_impl(address, OpcodeArm64::parse(opcode), kind);
-        }
+        Architecture::I386 => print_entry_impl(address, OpcodeX86::parse(opcode)),
+        Architecture::X86_64 => print_entry_impl(address, OpcodeX86_64::parse(opcode)),
+        Architecture::Aarch64 => print_entry_impl(address, OpcodeArm64::parse(opcode)),
         _ => {}
     }
 }
 
-fn print_entry_impl(address: u32, opcode: Option<impl Display>, kind: u8) {
-    match opcode {
-        Some(opcode) => println!(
-            "Found entry with function address 0x{:08x} and opcode {}",
-            address, opcode
-        ),
-        None => println!(
-            "  0x{:08x}: unknown opcode kind {}",
-            address, kind
-        ),
-    }
+fn print_entry_impl(address: u32, opcode: impl Display) {
+    println!(
+        "Found entry with function address 0x{:08x} and opcode {}",
+        address, opcode
+    );
 }

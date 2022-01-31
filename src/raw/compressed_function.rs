@@ -36,10 +36,7 @@ impl Debug for CompressedFunctionEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CompressedFunctionEntry")
             .field("opcode_index", &HexNum(self.opcode_index()))
-            .field(
-                "relative_address",
-                &HexNum(self.relative_address()),
-            )
+            .field("relative_address", &HexNum(self.relative_address()))
             .finish()
     }
 }
