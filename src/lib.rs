@@ -1,7 +1,7 @@
 //! A zero-copy parser for the contents of the `__unwind_info` section of a
 //! mach-O binary.
 //!
-//! Quickly look up the unwinding opcode for an address, and parse it to find
+//! Quickly look up the unwinding opcode for an address. Then parse the opcode to find
 //! out how to recover the return address and the caller frame's register values.
 //!
 //! This crate is intended to be fast enough to be used in a sampling profiler.
