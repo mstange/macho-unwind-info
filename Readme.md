@@ -12,7 +12,7 @@ out how to recover the return address and the caller frame's register values.
 This crate is intended to be fast enough to be used in a sampling profiler.
 Re-parsing from scratch is cheap and can be done on every sample.
 
-# Example
+## Example
 
 ```rust
 use macho_unwind_info::UnwindInfo;
@@ -35,9 +35,9 @@ This repository also contains two CLI executables. You can install them like so:
 % cargo install --examples macho-unwind-info
 ```
 
-## Credits
+## Acknowledgements
 
-Thanks a ton to @Gankra for documenting this format at https://gankra.github.io/blah/compact-unwinding/.
+Thanks a ton to [**@Gankra**](https://github.com/Gankra/) for documenting this format at https://gankra.github.io/blah/compact-unwinding/.
 
 ## License
 

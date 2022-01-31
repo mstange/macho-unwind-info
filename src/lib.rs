@@ -7,6 +7,27 @@
 //! This crate is intended to be fast enough to be used in a sampling profiler.
 //! Re-parsing from scratch is cheap and can be done on every sample.
 //!
+//! For the full unwinding experience, both `__unwind_info` and `__eh_frame` may need
+//! to be consulted. The two sections are complementary: `__unwind_info` handles the
+//! easy cases, and refers to an `__eh_frame` FDE for the hard cases. Conversely,
+//! `__eh_frame` only includes FDEs for functions whose unwinding info cannot be
+//! represented in `__unwind_info`.
+//!
+//! On x86 and x86_64, `__unwind_info` can represent most functions regardless of
+//! whether they were compiled with framepointers or without.
+//!
+//! On arm64, compiling without framepointers is strongly discouraged, and
+//! `__unwind_info` can only represent functions which have framepointers or
+//! which don't need to restore any registers. As a result, if you have an arm64
+//! binary without framepointers (rare!), then the `__unwind_info` basically just
+//! acts as an index for `__eh_frame`, similarly to `.eh_frame_hdr` for ELF.
+//!
+//! In clang's default configuration for arm64, non-leaf functions have framepointers
+//! and leaf functions without stored registers on the stack don't have framepointers.
+//! For leaf functions, the return address is kept in the `lr` register for the entire
+//! duration of the function. And the unwind info lets you discern between these two
+//! types of functions ("frame-based" and "frameless").
+//!
 //! # Example
 //!
 //! ```rust
@@ -215,6 +236,7 @@ impl<'a> UnwindInfo<'a> {
 }
 
 /// An iterator over the pages in the UnwindInfo.
+/// Skips the sentinel page at the end; only emits "real" pages.
 pub struct PageIter<'a>(PartialPages<'a>);
 
 impl<'a> PageIter<'a> {
