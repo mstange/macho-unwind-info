@@ -1,14 +1,28 @@
+/// The error type used in this crate.
 #[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
+    /// The data slice was not big enough to read the struct, or we
+    /// were trying to follow an invalid offset to somewhere outside
+    /// of the data bounds.
     #[error("Read error: {0}")]
     ReadError(#[from] ReadError),
 
+    /// Each page has a first_address which is supposed to match the
+    /// start address of its first function entry. If the two addresses
+    /// don't match, then the lookup will fail for addresses which fall
+    /// in the gap between the page start address and the page's first
+    /// function's start address.
     #[error("The page entry's first_address didn't match the address of its first function")]
     InvalidPageEntryFirstAddress,
 
+    /// The page kind was set to an unrecognized value.
     #[error("Invalid page kind")]
     InvalidPageKind,
 
+    /// There is only supposed to be one sentinel page, at the very end
+    /// of the pages list - its first_address gives the end address of
+    /// the unwind info address range. If a sentinel page is encountered
+    /// somewhere else, this error is thrown.
     #[error("Unexpected sentinel page")]
     UnexpectedSentinelPage,
 }

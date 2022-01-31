@@ -35,7 +35,7 @@ pub mod raw;
 
 mod reader;
 
-pub use error::Error;
+pub use error::*;
 use raw::*;
 
 /// A parsed representation of the unwind info.
