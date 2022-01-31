@@ -3,26 +3,27 @@
 
 # macho-unwind-info
 
-A zero-copy parser for the contents of the `__unwind_info` section of a mach-O binary.
+A zero-copy parser for the contents of the `__unwind_info` section of a
+mach-O binary.
 
-Quickly look up the unwinding opcode for an address.
+Quickly look up the unwinding opcode for an address, and parse it to find
+out how to recover the return address and the caller frame's register values.
 
-This crate is intended to be fast enough to be used in a sampling profiler. Re-parsing from scratch is cheap and can be done on every sample.
+This crate is intended to be fast enough to be used in a sampling profiler.
+Re-parsing from scratch is cheap and can be done on every sample.
 
-## Example
+# Example
 
 ```rust
-use macho_unwind_info::{UnwindInfo, OpcodeX86_64};
+use macho_unwind_info::UnwindInfo;
+use macho_unwind_info::opcodes::OpcodeX86_64;
 
 let unwind_info = UnwindInfo::parse(data)?;
+
 if let Some(function) = unwind_info.lookup(0x1234)? {
-    match OpcodeX86_64::parse(function.opcode) {
-        OpcodeX86_64::Null => println!("Null"),
-        OpcodeX86_64::FrameBased { .. } => println!("FrameBased"),
-        OpcodeX86_64::FramelessImmediate { .. } => println!("FramelessImmediate"),
-        OpcodeX86_64::FramelessIndirect => println!("FramelessIndirect"),
-        OpcodeX86_64::Dwarf { .. } => println!("Dwarf"),
-    }
+    println!("Found function entry covering the address 0x1234:");
+    let opcode = OpcodeX86_64::parse(function.opcode);
+    println!("0x{:08x}..0x{:08x}: {}", function.start_address, function.end_address, opcode);
 }
 ```
 
