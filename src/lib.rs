@@ -63,7 +63,16 @@ use raw::*;
 ///
 /// The UnwindInfo contains a list of pages, each of which contain a list of
 /// function entries.
-pub struct UnwindInfo<'a>(PartialPages<'a>);
+pub struct UnwindInfo<'a> {
+    /// The full __unwind_info section data.
+    data: &'a [u8],
+
+    /// The list of global opcodes.
+    global_opcodes: &'a [Opcode],
+
+    /// The list of page entries in this UnwindInfo.
+    pages: &'a [PageEntry],
+}
 
 /// The information about a single function in the UnwindInfo.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -83,22 +92,6 @@ pub struct Function {
     pub opcode: u32,
 }
 
-/// Internals used for both UnwindInfo and PagesIter. When used in PageIter, the
-/// pages field is the slice of the remaining to-be-iterated-over pages.
-#[derive(Clone, Copy)]
-struct PartialPages<'a> {
-    /// The full __unwind_info section data.
-    data: &'a [u8],
-
-    /// The list of global opcodes.
-    global_opcodes: &'a [Opcode],
-
-    /// The list of page entries in this UnwindInfo.
-    /// If this is the PartialPages inside a PageIter, this is the slice of the
-    /// remaining to-be-iterated-over pages.
-    pages: &'a [PageEntry],
-}
-
 impl<'a> UnwindInfo<'a> {
     /// Create an [UnwindInfo] instance which wraps the raw bytes of a mach-O binary's
     /// `__unwind_info` section. The data can have arbitrary alignment. The parsing done
@@ -107,16 +100,21 @@ impl<'a> UnwindInfo<'a> {
         let header = CompactUnwindInfoHeader::parse(data)?;
         let global_opcodes = header.global_opcodes(data)?;
         let pages = header.pages(data)?;
-        Ok(Self(PartialPages {
+        Ok(Self {
             data,
             global_opcodes,
             pages,
-        }))
+        })
     }
 
-    /// Returns an iterator over the pages in this UnwindInfo.
-    pub fn pages(&self) -> PageIter<'a> {
-        PageIter(self.0)
+    /// Returns an iterator over all the functions in this UnwindInfo.
+    pub fn functions(&self) -> FunctionIter<'a> {
+        FunctionIter {
+            data: self.data,
+            global_opcodes: self.global_opcodes,
+            pages: self.pages,
+            cur_page: None,
+        }
     }
 
     /// Looks up the unwind information for the function that covers the given address.
@@ -135,11 +133,11 @@ impl<'a> UnwindInfo<'a> {
     /// the right function within a page. The search happens inside the wrapped data,
     /// with no extra copies.
     pub fn lookup(&self, pc: u32) -> Result<Option<Function>, Error> {
-        let PartialPages {
+        let Self {
             pages,
             data,
             global_opcodes,
-        } = self.0;
+        } = self;
         let page_index = match pages.binary_search_by_key(&pc, PageEntry::first_address) {
             Ok(i) => i,
             Err(insertion_index) => {
@@ -235,19 +233,113 @@ impl<'a> UnwindInfo<'a> {
     }
 }
 
-/// An iterator over the pages in the UnwindInfo.
-/// Skips the sentinel page at the end; only emits "real" pages.
-pub struct PageIter<'a>(PartialPages<'a>);
+/// An iterator over the functions in an UnwindInfo page.
+pub struct FunctionIter<'a> {
+    /// The full __unwind_info section data.
+    data: &'a [u8],
 
-impl<'a> PageIter<'a> {
+    /// The list of global opcodes.
+    global_opcodes: &'a [Opcode],
+
+    /// The slice of the remaining to-be-iterated-over pages.
+    pages: &'a [PageEntry],
+
+    /// The page whose functions we're iterating over at the moment.
+    cur_page: Option<PageWithPartialFunctions<'a>>,
+}
+
+/// The current page of the function iterator.
+/// The functions field is the slice of the remaining to-be-iterated-over functions.
+#[derive(Clone, Copy)]
+enum PageWithPartialFunctions<'a> {
+    Regular {
+        next_page_address: u32,
+        functions: &'a [RegularFunctionEntry],
+    },
+    Compressed {
+        page_address: u32,
+        next_page_address: u32,
+        local_opcodes: &'a [Opcode],
+        functions: &'a [U32],
+    },
+}
+
+impl<'a> FunctionIter<'a> {
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<Page<'a>>, Error> {
-        let (page_entry, remainder) = match self.0.pages.split_first() {
+    pub fn next(&mut self) -> Result<Option<Function>, Error> {
+        loop {
+            let cur_page = if let Some(cur_page) = self.cur_page.as_mut() {
+                cur_page
+            } else {
+                let cur_page = match self.next_page()? {
+                    Some(page) => page,
+                    None => return Ok(None),
+                };
+                self.cur_page.insert(cur_page)
+            };
+
+            match cur_page {
+                PageWithPartialFunctions::Regular {
+                    next_page_address,
+                    functions,
+                } => {
+                    if let Some((entry, remainder)) = functions.split_first() {
+                        *functions = remainder;
+                        let start_address = entry.address();
+                        let end_address = remainder
+                            .first()
+                            .map(RegularFunctionEntry::address)
+                            .unwrap_or(*next_page_address);
+                        return Ok(Some(Function {
+                            start_address,
+                            end_address,
+                            opcode: entry.opcode(),
+                        }));
+                    }
+                }
+                PageWithPartialFunctions::Compressed {
+                    page_address,
+                    functions,
+                    next_page_address,
+                    local_opcodes,
+                } => {
+                    if let Some((entry, remainder)) = functions.split_first() {
+                        *functions = remainder;
+                        let entry = CompressedFunctionEntry::new((*entry).into());
+                        let start_address = *page_address + entry.relative_address();
+                        let end_address = match remainder.first() {
+                            Some(next_entry) => {
+                                let next_entry = CompressedFunctionEntry::new((*next_entry).into());
+                                *page_address + next_entry.relative_address()
+                            }
+                            None => *next_page_address,
+                        };
+                        let opcode_index: usize = entry.opcode_index().into();
+                        let opcode = if opcode_index < self.global_opcodes.len() {
+                            self.global_opcodes[opcode_index].opcode()
+                        } else {
+                            let local_index = opcode_index - self.global_opcodes.len();
+                            local_opcodes[local_index].opcode()
+                        };
+                        return Ok(Some(Function {
+                            start_address,
+                            end_address,
+                            opcode,
+                        }));
+                    }
+                }
+            }
+            self.cur_page = None;
+        }
+    }
+
+    fn next_page(&mut self) -> Result<Option<PageWithPartialFunctions<'a>>, Error> {
+        let (page_entry, remainder) = match self.pages.split_first() {
             Some(split) => split,
             None => return Ok(None),
         };
 
-        self.0.pages = remainder;
+        self.pages = remainder;
 
         let next_page_entry = match remainder.first() {
             Some(entry) => entry,
@@ -257,137 +349,27 @@ impl<'a> PageIter<'a> {
         let page_offset = page_entry.page_offset();
         let page_address = page_entry.first_address();
         let next_page_address = next_page_entry.first_address();
-        let data = self.0.data;
-        match page_entry.page_kind(data)? {
+        let data = self.data;
+        let cur_page = match page_entry.page_kind(data)? {
             consts::PAGE_KIND_REGULAR => {
                 let page = RegularPage::parse(data, page_offset.into())?;
-                Ok(Some(Page(PartialFunctions::Regular {
-                    page_address,
+                PageWithPartialFunctions::Regular {
                     functions: page.functions(data, page_offset)?,
                     next_page_address,
-                })))
+                }
             }
             consts::PAGE_KIND_COMPRESSED => {
                 let page = CompressedPage::parse(data, page_offset.into())?;
-                Ok(Some(Page(PartialFunctions::Compressed {
+                PageWithPartialFunctions::Compressed {
                     page_address,
                     next_page_address,
                     functions: page.functions(data, page_offset)?,
                     local_opcodes: page.local_opcodes(data, page_offset)?,
-                    global_opcodes: self.0.global_opcodes,
-                })))
+                }
             }
-            consts::PAGE_KIND_SENTINEL => Err(Error::UnexpectedSentinelPage),
-            _ => Err(Error::InvalidPageKind),
-        }
-    }
-}
-
-/// One page in the UnwindInfo.
-pub struct Page<'a>(PartialFunctions<'a>);
-
-/// Internals used for both Page and FunctionIter. When used in FunctionIter, the
-/// functions field is the slice of the remaining to-be-iterated-over functions.
-#[derive(Clone, Copy)]
-enum PartialFunctions<'a> {
-    Regular {
-        page_address: u32,
-        next_page_address: u32,
-        functions: &'a [RegularFunctionEntry],
-    },
-    Compressed {
-        page_address: u32,
-        next_page_address: u32,
-        local_opcodes: &'a [Opcode],
-        global_opcodes: &'a [Opcode],
-        functions: &'a [U32],
-    },
-}
-
-impl<'a> Page<'a> {
-    /// The start of the address range covered by the functions in this page.
-    pub fn start_address(&self) -> u32 {
-        match self.0 {
-            PartialFunctions::Regular { page_address, .. } => page_address,
-            PartialFunctions::Compressed { page_address, .. } => page_address,
-        }
-    }
-
-    /// The end of the address range covered by the functions in this page.
-    pub fn end_address(&self) -> u32 {
-        match self.0 {
-            PartialFunctions::Regular {
-                next_page_address, ..
-            } => next_page_address,
-            PartialFunctions::Compressed {
-                next_page_address, ..
-            } => next_page_address,
-        }
-    }
-
-    /// An iterator over the functions in this page.
-    pub fn functions(&self) -> FunctionIter<'a> {
-        FunctionIter(self.0)
-    }
-}
-
-/// An iterator over the functions in an UnwindInfo page.
-pub struct FunctionIter<'a>(PartialFunctions<'a>);
-
-impl<'a> Iterator for FunctionIter<'a> {
-    type Item = Function;
-
-    fn next(&mut self) -> Option<Function> {
-        match &mut self.0 {
-            PartialFunctions::Regular {
-                functions,
-                next_page_address,
-                ..
-            } => {
-                let (entry, remainder) = functions.split_first()?;
-                *functions = remainder;
-                let start_address = entry.address();
-                let end_address = remainder
-                    .first()
-                    .map(RegularFunctionEntry::address)
-                    .unwrap_or(*next_page_address);
-                Some(Function {
-                    start_address,
-                    end_address,
-                    opcode: entry.opcode(),
-                })
-            }
-            PartialFunctions::Compressed {
-                page_address,
-                functions,
-                next_page_address,
-                local_opcodes,
-                global_opcodes,
-            } => {
-                let (entry, remainder) = functions.split_first()?;
-                *functions = remainder;
-                let entry = CompressedFunctionEntry::new((*entry).into());
-                let start_address = *page_address + entry.relative_address();
-                let end_address = match remainder.first() {
-                    Some(next_entry) => {
-                        let next_entry = CompressedFunctionEntry::new((*next_entry).into());
-                        *page_address + next_entry.relative_address()
-                    }
-                    None => *next_page_address,
-                };
-                let opcode_index: usize = entry.opcode_index().into();
-                let opcode = if opcode_index < global_opcodes.len() {
-                    global_opcodes[opcode_index].opcode()
-                } else {
-                    let local_index = opcode_index - global_opcodes.len();
-                    local_opcodes[local_index].opcode()
-                };
-                Some(Function {
-                    start_address,
-                    end_address,
-                    opcode,
-                })
-            }
-        }
+            consts::PAGE_KIND_SENTINEL => return Err(Error::UnexpectedSentinelPage),
+            _ => return Err(Error::InvalidPageKind),
+        };
+        Ok(Some(cur_page))
     }
 }

@@ -26,17 +26,9 @@ fn main() {
     let arch = file.architecture();
 
     let info = UnwindInfo::parse(data).unwrap();
-    let mut page_iter = info.pages();
-    while let Some(page) = page_iter.next().unwrap() {
-        println!(
-            "0x{:08x}..0x{:08x} Page",
-            page.start_address(),
-            page.end_address()
-        );
-        for function in page.functions() {
-            print_entry(function.start_address, function.opcode, arch);
-        }
-        println!();
+    let mut function_iter = info.functions();
+    while let Some(function) = function_iter.next().unwrap() {
+        print_entry(function.start_address, function.opcode, arch);
     }
 }
 
@@ -50,5 +42,5 @@ fn print_entry(address: u32, opcode: u32, arch: Architecture) {
 }
 
 fn print_entry_impl(address: u32, opcode: impl Display) {
-    println!("  0x{:08x}: {}", address, opcode);
+    println!("0x{:08x}: {}", address, opcode);
 }
