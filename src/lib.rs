@@ -117,6 +117,16 @@ impl<'a> UnwindInfo<'a> {
         }
     }
 
+    /// Returns the range of addresses covered by unwind information.
+    pub fn address_range(&self) -> core::ops::Range<u32> {
+        if self.pages.is_empty() {
+            return 0..0;
+        }
+        let first_page = self.pages.first().unwrap();
+        let last_page = self.pages.last().unwrap();
+        first_page.first_address()..last_page.first_address()
+    }
+
     /// Looks up the unwind information for the function that covers the given address.
     /// Returns `Ok(Some(function))` if a function was found.
     /// Returns `Ok(None)` if the address was outside of the range of addresses covered

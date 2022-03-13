@@ -26,6 +26,12 @@ fn main() {
     let arch = file.architecture();
 
     let info = UnwindInfo::parse(data).unwrap();
+    let address_range = info.address_range();
+    println!(
+        "Unwind info for address range 0x{:08x}-0x{:08x}",
+        address_range.start, address_range.end
+    );
+    println!();
     let mut function_iter = info.functions();
     while let Some(function) = function_iter.next().unwrap() {
         print_entry(function.start_address, function.opcode, arch);
