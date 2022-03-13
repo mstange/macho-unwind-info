@@ -81,7 +81,7 @@ pub enum OpcodeX86_64 {
     Dwarf {
         eh_frame_fde: u32,
     },
-    InvalidFramelessImmediate,
+    InvalidFrameless,
     UnrecognizedKind(u8),
 }
 
@@ -106,7 +106,7 @@ impl OpcodeX86_64 {
                 let saved_registers =
                     match decode_permutation_6(register_count, register_permutation) {
                         Ok(regs) => regs,
-                        Err(_) => return OpcodeX86_64::InvalidFramelessImmediate,
+                        Err(_) => return OpcodeX86_64::InvalidFrameless,
                     };
                 OpcodeX86_64::FramelessImmediate {
                     stack_size_in_bytes,
@@ -128,7 +128,7 @@ impl OpcodeX86_64 {
                 let saved_registers =
                     match decode_permutation_6(register_count, register_permutation) {
                         Ok(regs) => regs,
-                        Err(_) => return OpcodeX86_64::InvalidFramelessImmediate,
+                        Err(_) => return OpcodeX86_64::InvalidFrameless,
                     };
                 OpcodeX86_64::FramelessIndirect {
                     immediate_offset_from_function_start,
@@ -209,10 +209,10 @@ impl Display for OpcodeX86_64 {
             OpcodeX86_64::Dwarf { eh_frame_fde } => {
                 write!(f, "(check eh_frame FDE 0x{:x})", eh_frame_fde)?;
             }
-            OpcodeX86_64::InvalidFramelessImmediate => {
+            OpcodeX86_64::InvalidFrameless => {
                 write!(
                     f,
-                    "!! frameless immediate with invalid permutation encoding"
+                    "!! frameless immediate or indirect with invalid permutation encoding"
                 )?;
             }
             OpcodeX86_64::UnrecognizedKind(kind) => {
