@@ -50,11 +50,31 @@ pub enum OpcodeX86 {
         stack_size_in_bytes: u16,
         saved_regs: [Option<RegisterNameX86>; 6],
     },
-    FramelessIndirect,
+    FramelessIndirect {
+        /// Offset from the start of the function into the middle of a `sub`
+        /// instruction, pointing right at the instruction's "immediate" which
+        /// is a u32 value with the offset we need. (NOTE: not divided by anything!)
+        immediate_offset_from_function_start: u8,
+
+        /// An offset to add to the loaded stack size.
+        /// This allows the stack size to differ slightly from the `sub`, to
+        /// compensate for any function prologue that pushes a bunch of
+        /// pointer-sized registers. This adjust value includes the return
+        /// address on the stack. For example, if the function begins with six push
+        /// instructions, followed by a sub instruction, then stack_adjust_in_bytes
+        /// is 28: 4 bytes for the return address + 6 * 4 for each pushed register.
+        stack_adjust_in_bytes: u8,
+
+        /// The registers, in the order that they need to be popped in when
+        /// returning / unwinding from this function. (Reverse order from
+        /// function prologue!)
+        /// Can have leading `None`s.
+        saved_regs: [Option<RegisterNameX86>; 6],
+    },
     Dwarf {
         eh_frame_fde: u32,
     },
-    InvalidFramelessImmediate,
+    InvalidFrameless,
     UnrecognizedKind(u8),
 }
 
@@ -79,7 +99,7 @@ impl OpcodeX86 {
                 let saved_registers =
                     match decode_permutation_6(register_count, register_permutation) {
                         Ok(regs) => regs,
-                        Err(_) => return OpcodeX86::InvalidFramelessImmediate,
+                        Err(_) => return OpcodeX86::InvalidFrameless,
                     };
                 OpcodeX86::FramelessImmediate {
                     stack_size_in_bytes,
@@ -93,7 +113,29 @@ impl OpcodeX86 {
                     ],
                 }
             }
-            OPCODE_KIND_X86_FRAMELESS_INDIRECT => OpcodeX86::FramelessIndirect,
+            OPCODE_KIND_X86_FRAMELESS_INDIRECT => {
+                let immediate_offset_from_function_start = (opcode >> 16) as u8;
+                let stack_adjust_in_bytes = ((opcode >> 13) & 0b111) as u8 * 4;
+                let register_count = (opcode >> 10) & 0b111;
+                let register_permutation = opcode & 0b11_1111_1111;
+                let saved_registers =
+                    match decode_permutation_6(register_count, register_permutation) {
+                        Ok(regs) => regs,
+                        Err(_) => return OpcodeX86::InvalidFrameless,
+                    };
+                OpcodeX86::FramelessIndirect {
+                    immediate_offset_from_function_start,
+                    stack_adjust_in_bytes,
+                    saved_regs: [
+                        RegisterNameX86::parse(saved_registers[0]),
+                        RegisterNameX86::parse(saved_registers[1]),
+                        RegisterNameX86::parse(saved_registers[2]),
+                        RegisterNameX86::parse(saved_registers[3]),
+                        RegisterNameX86::parse(saved_registers[4]),
+                        RegisterNameX86::parse(saved_registers[5]),
+                    ],
+                }
+            }
             OPCODE_KIND_X86_DWARF => OpcodeX86::Dwarf {
                 eh_frame_fde: (opcode & 0xffffff),
             },
@@ -140,16 +182,30 @@ impl Display for OpcodeX86 {
                     offset += 4;
                 }
             }
-            OpcodeX86::FramelessIndirect { .. } => {
-                write!(f, "frameless indirect")?;
+            OpcodeX86::FramelessIndirect {
+                immediate_offset_from_function_start,
+                stack_adjust_in_bytes,
+                saved_regs,
+            } => {
+                write!(
+                    f,
+                    "CFA=[function_start+{}]+{}",
+                    immediate_offset_from_function_start, stack_adjust_in_bytes
+                )?;
+                write!(f, " reg16=[CFA-4]")?;
+                let mut offset = 2 * 4;
+                for reg in saved_regs.iter().rev().flatten() {
+                    write!(f, ", {}=[CFA-{}]", reg.dwarf_name(), offset)?;
+                    offset += 4;
+                }
             }
             OpcodeX86::Dwarf { eh_frame_fde } => {
                 write!(f, "(check eh_frame FDE 0x{:x})", eh_frame_fde)?;
             }
-            OpcodeX86::InvalidFramelessImmediate => {
+            OpcodeX86::InvalidFrameless => {
                 write!(
                     f,
-                    "!! frameless immediate with invalid permutation encoding"
+                    "!! frameless immediate or indirect with invalid permutation encoding"
                 )?;
             }
             OpcodeX86::UnrecognizedKind(kind) => {
@@ -157,5 +213,30 @@ impl Display for OpcodeX86 {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_frameless_indirect() {
+        use RegisterNameX86::*;
+        assert_eq!(
+            OpcodeX86::parse(0x30df800),
+            OpcodeX86::FramelessIndirect {
+                immediate_offset_from_function_start: 13,
+                stack_adjust_in_bytes: 28,
+                saved_regs: [
+                    Some(Ebx),
+                    Some(Ecx),
+                    Some(Edx),
+                    Some(Edi),
+                    Some(Esi),
+                    Some(Ebp)
+                ]
+            }
+        )
     }
 }
