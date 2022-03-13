@@ -175,7 +175,7 @@ impl Display for OpcodeX86 {
                 } else {
                     write!(f, "CFA=reg7+{}:", *stack_size_in_bytes)?;
                 }
-                write!(f, " reg16=[CFA-8]")?;
+                write!(f, " reg16=[CFA-4]")?;
                 let mut offset = 2 * 4;
                 for reg in saved_regs.iter().rev().flatten() {
                     write!(f, ", {}=[CFA-{}]", reg.dwarf_name(), offset)?;
