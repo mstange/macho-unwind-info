@@ -12,12 +12,12 @@ readme = "Readme.md"
 exclude = ["/.github", "/tests", "/fixtures"]
 
 [dependencies]
-thiserror = "1.0.30"
+thiserror = "1.0.56"
 zerocopy = "0.7.32"
 zerocopy-derive = "0.7.32"
 
 [dev-dependencies]
-object = "0.28.2"
+object = "0.32.2"
 
 [[example]]
 name = "unwindinfodump"
