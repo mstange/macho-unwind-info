@@ -13,7 +13,8 @@ exclude = ["/.github", "/tests", "/fixtures"]
 
 [dependencies]
 thiserror = "1.0.30"
-zerocopy = "0.6.1"
+zerocopy = "0.7.32"
+zerocopy-derive = "0.7.32"
 
 [dev-dependencies]
 object = "0.28.2"
